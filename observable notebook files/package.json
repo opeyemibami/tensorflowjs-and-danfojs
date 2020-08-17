@@ -1,0 +1,14 @@
+{
+  "name": "162f47440bfe1f2f",
+  "main": "162f47440bfe1f2f@1769.js",
+  "version": "1769.0.0",
+  "homepage": "https://observablehq.com/d/162f47440bfe1f2f",
+  "author": {
+    "name": "Bamigbade Opeyemi",
+    "url": "https://observablehq.com/@opeyemibami"
+  },
+  "type": "module",
+  "peerDependencies": {
+    "@observablehq/runtime": "4"
+  }
+}
