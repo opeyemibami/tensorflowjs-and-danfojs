@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.jsdelivr.net/npm/danfojs@0.1.1/dist/index.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@2.1.0/dist/tf.min.js"></script>
+    <title>Document</title>
+</head>
+
+<body>
+    <div id="plot_div"></div>
+
+    <script>
+
+
+
+        // Loading and processing your data
+        async function load_process_data() {
+
+            // Data ingestion 
+            let df = await dfd.read_csv("https://raw.githubusercontent.com/opeyemibami/tensorflowjs-and-danfojs/master/dataset/wine_dataset.csv")
+            df.head().print()
+            
+            // Renaming "type" feature to "wine_type"
+            df = df.rename({mapper:{'type':'wine_type'}})
+            df.head().print()
+
+            // fill missing values
+            df = fill_missing_value(df)
+            df.isna().sum().print()
+            
+            // Encode wine_type to numbers
+            let df1 = df.replace({"replace": "white", "with": 0, "in": ["wine_type"]}) 
+            let df2 = df1.replace({"replace": "red", "with": 1, "in": ["wine_type"]})
+            df = df2.astype({column: "wine_type", dtype: "int32"})
+            df.head().print()
+
+            // Binning the target feature
+            df = bin_target(df)
+            df.head().print()
+
+            // Scale dataset 
+            df = scale_data(df)
+            df.head().print()
+            
+            // OneHotEncoding of the target feature since its a multiclass
+            let y_hot = oneHotEncode(df)
+            y_hot.head().print()
+
+            // merge X with encoded y for shuffling in train_test_split
+            df5 = merge_X_y(df,y_hot)
+            df5.head().print()
+
+            // Train Test splitting
+            train_test_split = train_test_split(df5)
+
+        
+            return train_test_split
+
+        }
+
+        function fill_missing_value(df1){
+            let df2
+            df1.columns.forEach(function(feat,i){
+            if(df1[feat].dtypes[0]!="string"){
+                let mean = Number(df1[feat].mean().toFixed(4))
+                df2 = df1.fillna({columns:[feat],values:[mean]})
+                }
+    
+            })
+            return df2
+        }
+         
+        function bin_target(df){
+            
+            let mapper = {1:0,2:0,3:0,4:0,5:0,6:1,7:2,8:2,9:2}
+            let new_cols = df['quality'].map(mapper).values
+            df.addColumn({ "column": "wine_quality", "value": new_cols })
+            df = df.drop({ columns: ["quality"], axis: 1, inplace: false})
+            return df
+        }
+        
+        function scale_data(df){
+            let y = df["wine_quality"].values
+            let scaler = new dfd.MinMaxScaler()
+            let X = df.iloc({ columns: ["0:12"] })
+            scaler.fit(X)
+            let scaled_df =  scaler.transform(X)
+            let df2 = new dfd.DataFrame(scaled_df.values,{columns: df.columns.slice(0,12)}).round(4)
+            df2.addColumn({ "column": "wine_quality", "value": y})
+            return df2
+        }
+            
+        function oneHotEncode(df){
+            let encoder = new dfd.OneHotEncoder()
+            let y = df["wine_quality"].values
+            encoder.fit(y)
+            let y_hot = encoder.transform(y)
+            return y_hot
+            
+        }
+        
+        
+        function merge_X_y(df,y_hot){
+
+            let X = df.drop({ columns: ["wine_quality"], axis: 1, inplace: false})
+            let com_df = dfd.concat({ df_list: [X, y_hot], axis: 1 })
+            return com_df  
+
+        }
+
+        function train_test_split(df5){
+
+            let df_len = df5.shape[0]
+            let df_sample = df5.sample(df_len)
+            let X = df_sample.iloc({columns: ["0:12"]})
+            let y = df_sample.iloc({columns: ["12:"]})
+            let X_train = X.iloc({rows: ["0:4999"]}).tensor
+            let y_train = y.iloc({rows: ["0:4999"]}).tensor
+            let X_test = X.iloc({rows: ["4999:"]}).tensor
+            let y_test = y.iloc({rows: ["4999:"]}).tensor
+            let data_array = [X_train,X_test,y_train,y_test]
+            return data_array
+        }
+
+        
+        function get_model(input_shape){
+
+            const model = tf.sequential({
+                layers: [
+                tf.layers.dense({inputShape: [input_shape], units: 32, activation: 'relu'}),
+                tf.layers.dense({units: 64, activation: 'relu'}),
+                tf.layers.dense({units: 128, activation: 'relu'}),
+                tf.layers.dense({units: 64, activation: 'relu'}),
+                tf.layers.dense({units: 32, activation: 'relu'}),
+                tf.layers.dense({units: 3, activation: 'softmax'})
+                ]
+            })
+            return model
+        }
+
+
+        async function train(){
+
+            const data = await load_process_data()
+            const X_train = data[0]
+            const X_test = data[1]
+            const y_train = data[2]
+            const y_test = data[3]
+
+            const input_shape = X_train.shape[1]
+            const model = await get_model(input_shape)
+
+              // Prepare the model for training: Specify the loss and the optimizer.
+            model.compile({
+                optimizer: 'sgd',
+                loss: 'categoricalCrossentropy',
+                metrics: ['accuracy'],
+            });
+
+            console.log("Training started....")
+
+            const history = await model.fit(X_train, y_train,{
+                epochs: 100,
+                batchSize: 32,
+                validationSplit: 0.2,           
+                callbacks:{
+                    onEpochEnd: async(epoch, logs)=>{
+                        console.log(`EPOCH (${epoch + 1}): Train Accuracy: ${(logs.acc * 100).toFixed(2)},
+                                                            Val Accuracy:  ${(logs.val_acc * 100).toFixed(2)}\n`);
+                    },
+                }
+            });
+
+            plot_history(history.history.acc,history.history.val_acc)
+        };
+
+        function plot_history(acc,val_acc){
+            console.log(acc)
+            console.log(val_acc)
+
+            let layout = {
+                title: 'Model Evaluation',
+                    xaxis: {
+                        title: 'Number of Epochs',
+                            },
+                    yaxis: {
+                        title: 'Accuracy',
+                            }
+                        }
+
+            let data = {"train_acc":acc,"val_acc":val_acc}
+            let df_output = new dfd.DataFrame(data)
+            df_output.plot("plot_div").line({layout:layout})
+        }
+
+        train()
+        
+        
+
+
+        // load_process_data()
+        
+
+    </script>
+
+</body>
+
+</html>
